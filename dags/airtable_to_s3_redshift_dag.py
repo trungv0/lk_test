@@ -64,6 +64,12 @@ with DAG(
         )
         for table in AIRTABLE_TABLES
     ]
+    remove_existed_raw_events_redshift = PostgresOperator(
+        sql=f"delete from {REDSHIFT_SCHEMA}.{REDSHIFT_EVENT_TABLE} "
+        "where created_at >= '{{ ds }}' and created_at < '{{ tomorrow_ds }}'",
+        postgres_conn_id='redshift_default',
+        task_id=f'remove_existed_raw_events_redshift',
+    )
     insert_raw_events_redshift = [
         S3ToRedshiftOperator(
             schema=REDSHIFT_SCHEMA,
@@ -80,5 +86,4 @@ with DAG(
         for table in AIRTABLE_TABLES
     ]
 
-    for t1, t2 in zip(get_events, insert_raw_events_redshift):
-        t1 >> t2
+    get_events >> remove_existed_raw_events_redshift >> insert_raw_events_redshift
