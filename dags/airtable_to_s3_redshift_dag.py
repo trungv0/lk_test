@@ -17,17 +17,8 @@ S3_PREFIX = os.environ.get("S3_PREFIX", "trung")
 
 REDSHIFT_SCHEMA = "trung"
 REDSHIFT_EVENT_TABLE = "event"
+REDSHIFT_EVENT_SEQUENCE_TABLE = "event_sequence"
 
-REDSHIFT_TABLES = {
-    # f"{REDSHIFT_SCHEMA}.event":
-    f"{REDSHIFT_SCHEMA}.event_sequence": [
-        ("id", "varchar"),
-        ("previous_event_id", "varchar"),
-        ("next_event_id", "varchar"),
-    ]
-    # f"{REDSHIFT_SCHEMA}.event_metrics":
-    # f"{REDSHIFT_SCHEMA}.event_metrics":
-}
 AIRTABLE_TABLES = ["App events", "Web events"]
 
 raw_columns = [
@@ -59,7 +50,12 @@ with DAG(
 ) as dag:
     get_events = [
         PythonOperator(
-            python_callable=partial(get_all_records, table=table, json_columns=["metadata", "event_properties"], columns=raw_columns),
+            python_callable=partial(
+                get_all_records,
+                table=table,
+                json_columns=["metadata", "event_properties"],
+                columns=raw_columns,
+            ),
             task_id=f"get_airtable_{slugify(table)}",
         )
         for table in AIRTABLE_TABLES
@@ -67,8 +63,8 @@ with DAG(
     remove_existed_raw_events_redshift = PostgresOperator(
         sql=f"delete from {REDSHIFT_SCHEMA}.{REDSHIFT_EVENT_TABLE} "
         "where created_at >= '{{ ds }}' and created_at < '{{ tomorrow_ds }}'",
-        postgres_conn_id='redshift_default',
-        task_id=f'remove_existed_raw_events_redshift',
+        postgres_conn_id="redshift_default",
+        task_id=f"remove_existed_raw_events_redshift",
     )
     insert_raw_events_redshift = [
         S3ToRedshiftOperator(
@@ -86,4 +82,29 @@ with DAG(
         for table in AIRTABLE_TABLES
     ]
 
-    get_events >> remove_existed_raw_events_redshift >> insert_raw_events_redshift
+    truncate_event_sequence_redshift = PostgresOperator(
+        sql=f"truncate table {REDSHIFT_SCHEMA}.{REDSHIFT_EVENT_SEQUENCE_TABLE}",
+        postgres_conn_id="redshift_default",
+        task_id=f"truncate_event_sequence_redshift",
+    )
+
+    aggregate_event_sequence_redshift = PostgresOperator(
+        sql=f"insert into {REDSHIFT_SCHEMA}.{REDSHIFT_EVENT_SEQUENCE_TABLE}"
+        "(id, user_id, previous_id, next_id) "
+        "select id, user_id,"
+        "lag(id) over (partition by user_id order by created_at) as previous_id,"
+        "lead(id) over (partition by user_id order by created_at) as next_id "
+        f"from {REDSHIFT_SCHEMA}.{REDSHIFT_EVENT_TABLE} "
+        "where user_id is not null "
+        "order by created_at",
+        postgres_conn_id="redshift_default",
+        task_id=f"aggregate_event_sequence_redshift",
+    )
+
+    (
+        get_events
+        >> remove_existed_raw_events_redshift
+        >> insert_raw_events_redshift
+        >> truncate_event_sequence_redshift
+        >> aggregate_event_sequence_redshift
+    )
