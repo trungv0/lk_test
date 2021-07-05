@@ -2,9 +2,19 @@
 
 ## Setup airflow locally using docker compose
 
+For initialization:
+
+```shell
+docker-compose up airflow-init
+```
+
+Start airflow:
+
 ```shell
 docker-compose up
 ```
+
+For more details, visit [Running Airflow in Docker](https://airflow.apache.org/docs/apache-airflow/stable/start/docker.html).
 
 ## Set connections
 
@@ -19,4 +29,5 @@ docker-compose up
   * extra: `{"region_name": "eu-west-1"}`
 * `redshift_default`:
   * conn type: `postgres`
-  * host, schema, login, password, port
+  * host, login, password, port as needed
+  * schema: use **database name**
