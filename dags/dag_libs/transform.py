@@ -1,4 +1,5 @@
 import os
+import urllib
 import tempfile
 import io
 import json
@@ -21,26 +22,30 @@ def parse_web_events(**kwargs):
     with tempfile.TemporaryDirectory() as temp_dir:
         local_temp_file = s3_hook.download_file(s3_path, S3_BUCKET, temp_dir)
         df = pd.read_parquet(os.path.join(temp_dir, local_temp_file))
-        df = df.merge(
-            df["metadata"].apply(json.loads).apply(pd.Series),
-            left_index=True,
-            right_index=True,
-        )
-        if "page_search" in df.columns:
-            mask_utm = df["page_search"].str.contains(r"\butm_\w+=").fillna(False)
-            if mask_utm.any():
-                utm_tags = (
-                    df.loc[mask_utm, "page_search"]
-                    .str.replace(r"^\?", "")
-                    .str.split("&")
-                    .explode()
-                    .str.split("=", n=1, expand=True)
-                )
-                utm_tags.columns = ["tag", "value"]
-                utm_tags = utm_tags[utm_tags["tag"].str.match(r"^utm_\w+$")].pivot(
-                    columns="tag", values="value"
-                )
-                df = df.merge(utm_tags, "left", left_index=True, right_index=True)
+    df = df.merge(
+        df["metadata"].apply(json.loads).apply(pd.Series),
+        left_index=True,
+        right_index=True,
+    )
+    if "page_search" in df.columns:
+        mask_utm = df["page_search"].str.contains(r"\butm_\w+=").fillna(False)
+        if mask_utm.any():
+            utm_tags = (
+                df.loc[mask_utm, "page_search"]
+                .str.replace(r"^\?", "")
+                .str.split("&")
+                .explode()
+                .str.split("=", n=1, expand=True)
+            )
+            utm_tags.columns = ["tag", "value"]
+            utm_tags["value"] = utm_tags["value"].apply(urllib.parse.unquote)
+            utm_tags = (
+                utm_tags[utm_tags["tag"].str.match(r"^utm_\w+$")]
+                .reset_index()
+                .drop_duplicates(["index", "tag"])  # duplicated tags might be treated differently
+                .pivot(index="index", columns="tag", values="value")
+            )
+            df = df.merge(utm_tags, "left", left_index=True, right_index=True)
 
     with io.BytesIO() as f:
         df.to_parquet(f)
