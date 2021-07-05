@@ -9,6 +9,7 @@ from functools import partial
 
 from dag_libs.helpers import slugify
 from dag_libs.airtable import get_all_records
+from dag_libs.test import test_raw_events
 from dag_libs.transform import parse_web_events, insert_first_visits_utm_tags
 
 
@@ -22,7 +23,29 @@ REDSHIFT_EVENT_SEQUENCE_TABLE = "event_sequence"
 REDSHIFT_EVENT_METRICS_TABLE = "event_metrics"
 REDSHIFT_ATTRIBUTION_TABLE = "attribution"
 
-AIRTABLE_TABLES = ["App events", "Web events"]
+AIRTABLE_TABLES = {
+    "App events": [
+        "id",
+        "created_at",
+        "ip_address",
+        "device_id",
+        "user_id",
+        "uuid",
+        "event_type",
+        "device_type",
+        "platform",
+    ],
+    "Web events": [
+        "id",
+        "created_at",
+        "ip_address",
+        "device_id",
+        "user_id",
+        "uuid",
+        "user_email",
+        "metadata",
+    ],
+}
 
 raw_columns = [
     "id",
@@ -42,7 +65,6 @@ raw_columns = [
 
 default_args = {
     "start_date": pendulum.datetime(2021, 5, 1),
-    "tags": ["exercise"],
 }
 
 with DAG(
@@ -50,6 +72,7 @@ with DAG(
     default_args=default_args,
     catchup=False,
     schedule_interval="0 2 * * *",
+    tags=["exercise"],
 ) as dag:
     get_events = [
         PythonOperator(
@@ -61,7 +84,18 @@ with DAG(
             ),
             task_id=f"get_airtable_{slugify(table)}",
         )
-        for table in AIRTABLE_TABLES
+        for table in AIRTABLE_TABLES.keys()
+    ]
+    test_events = [
+        PythonOperator(
+            python_callable=partial(
+                test_raw_events,
+                file_name=f"{slugify(table)}.parquet",
+                columns=columns,
+            ),
+            task_id=f"test_raw_{slugify(table)}",
+        )
+        for table, columns in AIRTABLE_TABLES.items()
     ]
     parse_web_events_task = PythonOperator(
         python_callable=parse_web_events,
@@ -144,7 +178,9 @@ with DAG(
         task_id="insert_attribution_redshift",
     )
 
-    get_events >> parse_web_events_task
+    for t1, t2 in zip(get_events, test_events):
+        t1 >> t2
+    test_events >> parse_web_events_task
     (
         parse_web_events_task
         >> remove_existed_raw_events_redshift
