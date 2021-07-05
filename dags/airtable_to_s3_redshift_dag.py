@@ -5,8 +5,6 @@ from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.providers.amazon.aws.transfers.s3_to_redshift import S3ToRedshiftOperator
 import pendulum
 
-from functools import partial
-
 from dag_libs.helpers import slugify
 from dag_libs.airtable import get_all_records
 from dag_libs.test import test_raw_events
@@ -23,6 +21,7 @@ REDSHIFT_EVENT_SEQUENCE_TABLE = "event_sequence"
 REDSHIFT_EVENT_METRICS_TABLE = "event_metrics"
 REDSHIFT_ATTRIBUTION_TABLE = "attribution"
 
+AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_TABLE_ID", "appWzDISwYl2XFcEz")
 AIRTABLE_TABLES = {
     "App events": [
         "id",
@@ -76,22 +75,27 @@ with DAG(
 ) as dag:
     get_events = [
         PythonOperator(
-            python_callable=partial(
-                get_all_records,
+            python_callable=get_all_records,
+            task_id=f"get_airtable_{slugify(table)}",
+            op_kwargs=dict(
                 table=table,
+                airtable_table_id=AIRTABLE_TABLE_ID,
+                s3_bucket=S3_BUCKET,
+                s3_prefix=S3_PREFIX,
                 json_columns=["metadata", "event_properties"],
                 columns=raw_columns,
             ),
-            task_id=f"get_airtable_{slugify(table)}",
         )
         for table in AIRTABLE_TABLES.keys()
     ]
     test_events = [
         PythonOperator(
-            python_callable=partial(
-                test_raw_events,
+            python_callable=test_raw_events,
+            op_kwargs=dict(
                 file_name=f"{slugify(table)}.parquet",
                 columns=columns,
+                s3_bucket=S3_BUCKET,
+                s3_prefix=S3_PREFIX,
             ),
             task_id=f"test_raw_{slugify(table)}",
         )
@@ -100,6 +104,10 @@ with DAG(
     parse_web_events_task = PythonOperator(
         python_callable=parse_web_events,
         task_id="parse_web_events",
+        op_kwargs=dict(
+            s3_bucket=S3_BUCKET,
+            s3_prefix=S3_PREFIX,
+        )
     )
     remove_existed_raw_events_redshift = PostgresOperator(
         sql=f"delete from {REDSHIFT_SCHEMA}.{REDSHIFT_EVENT_TABLE} "
@@ -170,10 +178,12 @@ with DAG(
     )
 
     insert_attribution_redshift = PythonOperator(
-        python_callable=partial(
-            insert_first_visits_utm_tags,
+        python_callable=insert_first_visits_utm_tags,
+        op_kwargs=dict(
             schema=REDSHIFT_SCHEMA,
             table=REDSHIFT_ATTRIBUTION_TABLE,
+            s3_bucket=S3_BUCKET,
+            s3_prefix=S3_PREFIX,
         ),
         task_id="insert_attribution_redshift",
     )

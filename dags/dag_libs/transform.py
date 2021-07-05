@@ -9,19 +9,15 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
-S3_BUCKET = os.environ.get("S3_BUCKET", "luko-data-eng-exercice")
-S3_PREFIX = os.environ.get("S3_PREFIX", "trung")
-
-
-def parse_web_events(**kwargs):
+def parse_web_events(s3_bucket, s3_prefix="", **kwargs):
     date_ = kwargs["execution_date"].date()
     s3_hook = S3Hook(aws_conn_id="s3_default")
     file_name = "web_events.parquet"
     out_file_name = "web_events_parsed.parquet"
 
-    s3_path = os.path.join(S3_PREFIX, date_.strftime("%Y%m%d"), file_name)
+    s3_path = os.path.join(s3_prefix, date_.strftime("%Y%m%d"), file_name)
     with tempfile.TemporaryDirectory() as temp_dir:
-        local_temp_file = s3_hook.download_file(s3_path, S3_BUCKET, temp_dir)
+        local_temp_file = s3_hook.download_file(s3_path, s3_bucket, temp_dir)
         df = pd.read_parquet(os.path.join(temp_dir, local_temp_file))
     df = df.merge(
         df["metadata"].apply(json.loads).apply(pd.Series),
@@ -34,12 +30,12 @@ def parse_web_events(**kwargs):
             utm_tags = (
                 df.loc[mask_utm, "page_search"]
                 .str.replace(r"^\?", "")
-                .str.split("&")
+                .str.split(r"&(?=\w+=)")
                 .explode()
                 .str.split("=", n=1, expand=True)
             )
             utm_tags.columns = ["tag", "value"]
-            utm_tags["value"] = utm_tags["value"].apply(urllib.parse.unquote)
+            utm_tags["value"] = utm_tags["value"].fillna("").apply(urllib.parse.unquote)
             utm_tags = (
                 utm_tags[utm_tags["tag"].str.match(r"^utm_\w+$")]
                 .reset_index()
@@ -50,19 +46,19 @@ def parse_web_events(**kwargs):
 
     with io.BytesIO() as f:
         df.to_parquet(f)
-        s3_path_out = os.path.join(S3_PREFIX, date_.strftime("%Y%m%d"), out_file_name)
-        s3_hook.load_bytes(f.getvalue(), s3_path_out, S3_BUCKET, replace=True)
+        s3_path_out = os.path.join(s3_prefix, date_.strftime("%Y%m%d"), out_file_name)
+        s3_hook.load_bytes(f.getvalue(), s3_path_out, s3_bucket, replace=True)
 
 
-def insert_first_visits_utm_tags(schema, table, **kwargs):
+def insert_first_visits_utm_tags(schema, table, s3_bucket, s3_prefix="", **kwargs):
     date_ = kwargs["execution_date"].date()
     s3_hook = S3Hook(aws_conn_id="s3_default")
     redshift_hook = PostgresHook(postgres_conn_id="redshift_default")
     file_name = "web_events_parsed.parquet"
 
-    s3_path = os.path.join(S3_PREFIX, date_.strftime("%Y%m%d"), file_name)
+    s3_path = os.path.join(s3_prefix, date_.strftime("%Y%m%d"), file_name)
     with tempfile.TemporaryDirectory() as temp_dir:
-        local_temp_file = s3_hook.download_file(s3_path, S3_BUCKET, temp_dir)
+        local_temp_file = s3_hook.download_file(s3_path, s3_bucket, temp_dir)
         df = pd.read_parquet(os.path.join(temp_dir, local_temp_file))
 
     utm_cols = df.columns[df.columns.str.startswith("utm")]
