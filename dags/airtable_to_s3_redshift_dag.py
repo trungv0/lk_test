@@ -19,6 +19,7 @@ S3_PREFIX = os.environ.get("S3_PREFIX", "trung")
 REDSHIFT_SCHEMA = "trung"
 REDSHIFT_EVENT_TABLE = "event"
 REDSHIFT_EVENT_SEQUENCE_TABLE = "event_sequence"
+REDSHIFT_EVENT_METRICS_TABLE = "event_metrics"
 REDSHIFT_ATTRIBUTION_TABLE = "attribution"
 
 AIRTABLE_TABLES = ["App events", "Web events"]
@@ -107,6 +108,26 @@ with DAG(
         task_id=f"aggregate_event_sequence_redshift",
     )
 
+    remove_existed_metrics_redshift = PostgresOperator(
+        sql=f'delete from "{REDSHIFT_SCHEMA}"."{REDSHIFT_EVENT_METRICS_TABLE}" '
+        "where date = '{{ ds }}'",
+        postgres_conn_id="redshift_default",
+        task_id=f"remove_existed_metrics_redshift",
+    )
+
+    aggregate_metrics_redshift = PostgresOperator(
+        sql=f'insert into "{REDSHIFT_SCHEMA}"."{REDSHIFT_EVENT_METRICS_TABLE}"'
+        "(date, nb_app_events, nb_web_events) "
+        "select created_at::date,"
+        "count(case when device_type is null and platform is null and event_properties is null then 1 else null end),"
+        "count(case when device_type is null and platform is null and event_properties is null then null else 1 end) "
+        f'from "{REDSHIFT_SCHEMA}"."{REDSHIFT_EVENT_TABLE}" '
+        "where created_at::date = '{{ ds }}' "
+        "group by created_at::date",
+        postgres_conn_id="redshift_default",
+        task_id=f"aggregate_metrics_redshift",
+    )
+
     remove_existed_attribution_redshift = PostgresOperator(
         sql=f"delete from {REDSHIFT_SCHEMA}.{REDSHIFT_ATTRIBUTION_TABLE} "
         "where visited_at >= '{{ ds }}' and visited_at < '{{ tomorrow_ds }}'",
@@ -128,8 +149,16 @@ with DAG(
         parse_web_events_task
         >> remove_existed_raw_events_redshift
         >> insert_raw_events_redshift
+    )
+    (
+        insert_raw_events_redshift
         >> truncate_event_sequence_redshift
         >> aggregate_event_sequence_redshift
+    )
+    (
+        insert_raw_events_redshift
+        >> remove_existed_metrics_redshift
+        >> aggregate_metrics_redshift
     )
     (
         parse_web_events_task
