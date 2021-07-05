@@ -9,7 +9,7 @@ from functools import partial
 
 from dag_libs.helpers import slugify
 from dag_libs.airtable import get_all_records
-from dag_libs.transform import parse_web_events
+from dag_libs.transform import parse_web_events, insert_first_visits_utm_tags
 
 
 S3_REGION = os.environ.get("S3_REGION", "eu-west-1")
@@ -19,6 +19,7 @@ S3_PREFIX = os.environ.get("S3_PREFIX", "trung")
 REDSHIFT_SCHEMA = "trung"
 REDSHIFT_EVENT_TABLE = "event"
 REDSHIFT_EVENT_SEQUENCE_TABLE = "event_sequence"
+REDSHIFT_ATTRIBUTION_TABLE = "attribution"
 
 AIRTABLE_TABLES = ["App events", "Web events"]
 
@@ -106,11 +107,32 @@ with DAG(
         task_id=f"aggregate_event_sequence_redshift",
     )
 
+    remove_existed_attribution_redshift = PostgresOperator(
+        sql=f"delete from {REDSHIFT_SCHEMA}.{REDSHIFT_ATTRIBUTION_TABLE} "
+        "where visited_at >= '{{ ds }}' and visited_at < '{{ tomorrow_ds }}'",
+        postgres_conn_id="redshift_default",
+        task_id=f"remove_existed_attribution_redshift",
+    )
+
+    insert_attribution_redshift = PythonOperator(
+        python_callable=partial(
+            insert_first_visits_utm_tags,
+            schema=REDSHIFT_SCHEMA,
+            table=REDSHIFT_ATTRIBUTION_TABLE,
+        ),
+        task_id="insert_attribution_redshift",
+    )
+
+    get_events >> parse_web_events_task
     (
-        get_events
-        >> parse_web_events_task
+        parse_web_events_task
         >> remove_existed_raw_events_redshift
         >> insert_raw_events_redshift
         >> truncate_event_sequence_redshift
         >> aggregate_event_sequence_redshift
+    )
+    (
+        parse_web_events_task
+        >> remove_existed_attribution_redshift
+        >> insert_attribution_redshift
     )
