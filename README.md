@@ -31,3 +31,7 @@ For more details, visit [Running Airflow in Docker](https://airflow.apache.org/d
   * conn type: `postgres`
   * host, login, password, port as needed
   * schema: use **database name**
+
+## Setup Redshift tables
+
+Execute the script `scripts/init_database.sql` to create the required tables.
