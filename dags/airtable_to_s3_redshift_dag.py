@@ -9,6 +9,7 @@ from functools import partial
 
 from dag_libs.helpers import slugify
 from dag_libs.airtable import get_all_records
+from dag_libs.transform import parse_web_events
 
 
 S3_REGION = os.environ.get("S3_REGION", "eu-west-1")
@@ -60,6 +61,10 @@ with DAG(
         )
         for table in AIRTABLE_TABLES
     ]
+    parse_web_events_task = PythonOperator(
+        python_callable=parse_web_events,
+        task_id="parse_web_events",
+    )
     remove_existed_raw_events_redshift = PostgresOperator(
         sql=f"delete from {REDSHIFT_SCHEMA}.{REDSHIFT_EVENT_TABLE} "
         "where created_at >= '{{ ds }}' and created_at < '{{ tomorrow_ds }}'",
@@ -103,6 +108,7 @@ with DAG(
 
     (
         get_events
+        >> parse_web_events_task
         >> remove_existed_raw_events_redshift
         >> insert_raw_events_redshift
         >> truncate_event_sequence_redshift
