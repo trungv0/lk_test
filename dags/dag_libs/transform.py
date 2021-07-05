@@ -10,6 +10,13 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 def parse_web_events(s3_bucket, s3_prefix="", **kwargs):
+    """Download raw web events, parse metadata and upload to s3.
+
+    :param s3_bucket: s3 bucket
+    :type s3_bucket: str
+    :param s3_prefix: s3 prefix, defaults to ""
+    :type s3_prefix: str, optional
+    """
     date_ = kwargs["execution_date"].date()
     s3_hook = S3Hook(aws_conn_id="s3_default")
     file_name = "web_events.parquet"
@@ -51,6 +58,17 @@ def parse_web_events(s3_bucket, s3_prefix="", **kwargs):
 
 
 def insert_first_visits_utm_tags(schema, table, s3_bucket, s3_prefix="", **kwargs):
+    """Compute utm tags of first visits by user. Result is inserted to Redshift.
+
+    :param schema: DB schema
+    :type schema: str
+    :param table: DB table
+    :type table: str
+    :param s3_bucket: s3 bucket
+    :type s3_bucket: str
+    :param s3_prefix: s3 prefix, defaults to ""
+    :type s3_prefix: str, optional
+    """    
     date_ = kwargs["execution_date"].date()
     s3_hook = S3Hook(aws_conn_id="s3_default")
     redshift_hook = PostgresHook(postgres_conn_id="redshift_default")

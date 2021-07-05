@@ -21,7 +21,7 @@ REDSHIFT_EVENT_SEQUENCE_TABLE = "event_sequence"
 REDSHIFT_EVENT_METRICS_TABLE = "event_metrics"
 REDSHIFT_ATTRIBUTION_TABLE = "attribution"
 
-AIRTABLE_TABLE_ID = os.environ.get("AIRTABLE_TABLE_ID", "appWzDISwYl2XFcEz")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appWzDISwYl2XFcEz")
 AIRTABLE_TABLES = {
     "App events": [
         "id",
@@ -79,7 +79,7 @@ with DAG(
             task_id=f"get_airtable_{slugify(table)}",
             op_kwargs=dict(
                 table=table,
-                airtable_table_id=AIRTABLE_TABLE_ID,
+                airtable_base_id=AIRTABLE_BASE_ID,
                 s3_bucket=S3_BUCKET,
                 s3_prefix=S3_PREFIX,
                 json_columns=["metadata", "event_properties"],

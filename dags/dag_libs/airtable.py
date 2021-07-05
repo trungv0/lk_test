@@ -39,18 +39,37 @@ class AirtableHook(HttpHook):
 
 def get_all_records(
     table,
-    airtable_table_id,
+    airtable_base_id,
     s3_bucket,
     s3_prefix="",
     json_columns=None,
     columns=None,
     **kwargs,
 ):
+    """Retrieve raw events from Airtable. Result is uploaded to S3.
+
+    JSON columns are parsed and trimmed.
+    Missing columns are added automatically so that Redshift doesn't complain about
+    mismatches on transfer.
+
+    :param table: Airtable table
+    :type table: str
+    :param airtable_base_id: Airtable base id
+    :type airtable_base_id: str
+    :param s3_bucket: s3 bucket
+    :type s3_bucket: str
+    :param s3_prefix: s3 prefix, defaults to ""
+    :type s3_prefix: str, optional
+    :param json_columns: JSON columns, defaults to None
+    :type json_columns: List[str], optional
+    :param columns: expected columns, missing ones are added, defaults to None
+    :type columns: List[str], optional
+    """
     if json_columns is None:
         json_columns = []
     date_ = kwargs["execution_date"].date()
     hook = AirtableHook(
-        airtable_table_id, http_conn_id="airtable_default", method="GET"
+        airtable_base_id, http_conn_id="airtable_default", method="GET"
     )
     s3_hook = S3Hook(aws_conn_id="s3_default")
     resp = hook.run(table, date_)
