@@ -58,7 +58,7 @@ def get_all_records(table, json_columns=None, columns=None, **kwargs):
     while offset:
         resp = hook.run(table, date_, offset)
         data = resp.json()
-        records = data["records"]
+        records += data["records"]
         offset = data.get("offset")
 
     with tempfile.TemporaryDirectory() as temp_dir:
